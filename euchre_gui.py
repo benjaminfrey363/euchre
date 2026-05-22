@@ -2,25 +2,28 @@ from __future__ import annotations
 
 import random
 import tkinter as tk
-from typing import Callable, Optional, Protocol, cast
+from typing import Callable, Optional, cast
 
-from euchre_terminal import (
+from logic.cards import (
     Card,
-    EuchreGame,
     Rank,
-    SimpleBotPolicy,
     Suit,
     SUITS,
     effective_suit,
     is_left_bower,
     is_right_bower,
-    legal_cards,
     make_deck,
+)
+
+from logic.rules import (
+    legal_cards,
     next_player,
     left_of,
     team_of,
     trick_winner,
 )
+
+from logic.policies import SimpleBotPolicy, Protocol, EuchreGame
 
 
 CARD_WIDTH = 62

@@ -1,6 +1,7 @@
+
 import pytest
 
-from euchre_terminal import (
+from logic.cards import (
     Card,
     Rank,
     Suit,
@@ -8,6 +9,9 @@ from euchre_terminal import (
     is_left_bower,
     is_right_bower,
     is_trump,
+)
+
+from logic.rules import (
     legal_cards,
     trick_winner,
     team_of,
