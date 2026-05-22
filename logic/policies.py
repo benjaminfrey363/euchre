@@ -298,3 +298,40 @@ class SimpleBotPolicy:
         # Cannot win; dump weakest legal card.
         return min(legal, key=lambda card: card_strength(card, trump, led_suit))
 
+
+
+# Random policy used as baseline
+class RandomPolicy:
+    def choose_order_up(
+        self,
+        game: EuchreGame,
+        player: int,
+        upcard: Card,
+        is_dealer: bool,
+    ) -> bool:
+        return game.random.random() < 0.25
+
+    def choose_trump(
+        self,
+        game: EuchreGame,
+        player: int,
+        forbidden_suit: Suit,
+        is_dealer: bool,
+    ) -> Optional[Suit]:
+        choices = [suit for suit in SUITS if suit != forbidden_suit]
+        if game.random.random() < 0.25:
+            return game.random.choice(choices)
+        return None
+
+    def choose_discard(self, game: EuchreGame, player: int) -> Card:
+        return game.random.choice(game.hands[player])
+
+    def choose_card(
+        self,
+        game: EuchreGame,
+        player: int,
+        legal: list[Card],
+        trick: list[tuple[int, Card]],
+    ) -> Card:
+        return game.random.choice(legal)
+
