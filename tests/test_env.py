@@ -7,6 +7,8 @@ from logic.env import (
 )
 from logic.policies import Policy, RandomPolicy, SimpleBotPolicy
 
+from logic.env import RandomActionPolicy
+
 
 def test_random_policies_can_complete_one_game() -> None:
     policies: list[Policy] = [
@@ -214,4 +216,25 @@ def test_apply_play_card_action_removes_card_from_hand_and_adds_to_trick() -> No
     assert card not in env.hands[0]
     assert env.trick == [(0, card)]
     assert env.led_suit is not None
+
+
+def test_step_api_can_complete_one_game_with_random_action_policy() -> None:
+    env = make_random_env()
+    policy = RandomActionPolicy(seed=123)
+
+    obs = env.reset()
+    done = False
+    steps = 0
+
+    while not done and steps < 1000:
+        action = policy.choose_action(obs)
+        result = env.step(action)
+
+        obs = result.observation
+        done = result.done
+        steps += 1
+
+    assert done
+    assert steps < 1000
+    assert max(env.scores) >= env.winning_score
 

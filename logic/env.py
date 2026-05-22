@@ -88,6 +88,13 @@ class ActionPolicy(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class StepResult:
+    observation: Observation
+    reward: float
+    done: bool
+    info: dict[str, object]
+
 
 
 
@@ -423,7 +430,11 @@ class EuchreEnv:
         assert self.upcard is not None
         self.trump = self.upcard.suit
         self.maker = player
-        self.dealer_pickup()
+
+        self.hands[self.dealer].append(self.upcard)
+        self.phase = "discard"
+        self.current_player = self.dealer
+
         return True
 
 
@@ -485,6 +496,165 @@ class EuchreEnv:
             )
 
         return action
+    
+    def reset(self) -> Observation:
+        """
+        Start a fresh game and return the first player's observation.
+        """
+        self.reset_game()
+        self.deal()
+
+        assert self.current_player in {0, 1, 2, 3}
+        return self.observation_for_player(self.current_player)
+    
+
+    def advance_to_next_bidder(self) -> None:
+        self.current_player = next_player(self.current_player)
+
+        # If we have returned to the player left of dealer after round 1,
+        # move to round 2.
+        if self.phase == "bidding_round_1" and self.current_player == left_of(self.dealer):
+            self.phase = "bidding_round_2"
+
+        # If round 2 also makes a full loop, redeal with next dealer.
+        elif self.phase == "bidding_round_2" and self.current_player == left_of(self.dealer):
+            self.dealer = next_player(self.dealer)
+            self.deal()
+
+
+    def begin_play(self) -> None:
+        if self.trump is None:
+            raise ValueError("Cannot begin play before trump is chosen.")
+
+        self.phase = "play_card"
+        self.trick = []
+        self.tricks_by_team = [0, 0]
+        self.led_suit = None
+        self.current_player = left_of(self.dealer)
+
+
+    def finish_trick_if_complete(self) -> Optional[int]:
+        """
+        Finish the trick if four cards have been played.
+
+        Returns the trick winner if a trick ended, otherwise None.
+        """
+        if len(self.trick) < 4:
+            return None
+
+        assert self.trump is not None
+
+        winner = trick_winner(self.trick, self.trump)
+        self.tricks_by_team[team_of(winner)] += 1
+
+        self.trick = []
+        self.led_suit = None
+        self.current_player = winner
+
+        return winner
+    
+
+    def finish_hand_if_complete(self) -> Optional[HandResult]:
+        """
+        Score the hand after all five tricks are complete.
+
+        Returns a HandResult if the hand ended, otherwise None.
+        """
+        if sum(self.tricks_by_team) < 5:
+            return None
+
+        result = self.score_hand(self.tricks_by_team)
+
+        if max(self.scores) >= self.winning_score:
+            self.phase = "game_over"
+        else:
+            self.dealer = next_player(self.dealer)
+            self.deal()
+
+        return result
+    
+    def step(self, action: Action) -> StepResult:
+        """
+        Apply one action for the current player.
+
+        Returns:
+            StepResult(observation, reward, done, info)
+
+        Reward convention for now:
+        - 0.0 during the game
+        - +1.0 to players on the winning team at game end
+        - -1.0 to players on the losing team at game end
+
+        Since this method returns only the next current player's observation,
+        the reward is from that next player's team perspective. Later, for RL,
+        we may want per-player or per-team reward records instead.
+        """
+        player = self.current_player
+        legal_actions = self.legal_actions_for_player(player)
+
+        if action not in legal_actions:
+            raise ValueError(
+                f"Illegal action {action} for player {player}; legal actions are {legal_actions}."
+            )
+
+        info: dict[str, object] = {
+            "player": player,
+            "phase": self.phase,
+        }
+
+        if self.phase == "bidding_round_1":
+            assert isinstance(action, OrderUpAction)
+            trump_chosen = self.apply_order_up_action(player, action)
+
+            if not trump_chosen:
+                self.advance_to_next_bidder()
+
+        elif self.phase == "bidding_round_2":
+            assert isinstance(action, CallTrumpAction)
+            trump_chosen = self.apply_call_trump_action(player, action)
+
+            if trump_chosen:
+                self.begin_play()
+            else:
+                self.advance_to_next_bidder()
+
+        elif self.phase == "discard":
+            assert isinstance(action, DiscardAction)
+            self.apply_discard_action(player, action)
+            self.begin_play()
+
+        elif self.phase == "play_card":
+            assert isinstance(action, PlayCardAction)
+            self.apply_play_card_action(player, action)
+
+            if len(self.trick) == 4:
+                winner = self.finish_trick_if_complete()
+                info["trick_winner"] = winner
+
+                hand_result = self.finish_hand_if_complete()
+                if hand_result is not None:
+                    info["hand_result"] = hand_result
+            else:
+                self.current_player = next_player(player)
+
+        else:
+            raise ValueError(f"Cannot step during phase {self.phase}")
+
+        done = self.phase == "game_over"
+
+        reward = 0.0
+        if done:
+            winning_team = 0 if self.scores[0] > self.scores[1] else 1
+            reward = 1.0 if team_of(self.current_player) == winning_team else -1.0
+            info["winning_team"] = winning_team
+            info["final_score"] = (self.scores[0], self.scores[1])
+
+        return StepResult(
+            observation=self.observation_for_player(self.current_player),
+            reward=reward,
+            done=done,
+            info=info,
+        )
     
 
 
