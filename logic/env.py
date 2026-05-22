@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import random
-from typing import Optional, cast, Union
+from typing import Optional, cast, Union, Protocol
 
 from logic.cards import Card, Suit, make_deck, effective_suit
 from logic.rules import legal_cards, next_player, left_of, team_of, trick_winner
@@ -83,7 +83,9 @@ class Observation:
 
 
 
-
+class ActionPolicy(Protocol):
+    def choose_action(self, observation: Observation) -> Action:
+        ...
 
 
 
@@ -410,3 +412,91 @@ class EuchreEnv:
             average_score=(total_scores[0] / n_games, total_scores[1] / n_games),
             average_hands_per_game=total_hands / n_games,
         )
+    
+    def apply_order_up_action(self, player: int, action: OrderUpAction) -> bool:
+        if self.phase != "bidding_round_1":
+            raise ValueError(f"Cannot order up during phase {self.phase}")
+
+        if not action.order_up:
+            return False
+
+        assert self.upcard is not None
+        self.trump = self.upcard.suit
+        self.maker = player
+        self.dealer_pickup()
+        return True
+
+
+    def apply_call_trump_action(self, player: int, action: CallTrumpAction) -> bool:
+        if self.phase != "bidding_round_2":
+            raise ValueError(f"Cannot call trump during phase {self.phase}")
+
+        if action.suit is None:
+            return False
+
+        assert self.upcard is not None
+        if action.suit == self.upcard.suit:
+            raise ValueError("Cannot call the turned-down upcard suit in bidding round 2.")
+
+        self.trump = action.suit
+        self.maker = player
+        return True
+
+
+    def apply_discard_action(self, player: int, action: DiscardAction) -> None:
+        if self.phase != "discard":
+            raise ValueError(f"Cannot discard during phase {self.phase}")
+
+        if action.card not in self.hands[player]:
+            raise ValueError(f"Player {player} cannot discard {action.card}; card is not in hand.")
+
+        self.hands[player].remove(action.card)
+
+
+    def apply_play_card_action(self, player: int, action: PlayCardAction) -> None:
+        if self.phase != "play_card":
+            raise ValueError(f"Cannot play a card during phase {self.phase}")
+
+        assert self.trump is not None
+        legal = legal_cards(self.hands[player], self.trump, self.led_suit)
+
+        if action.card not in legal:
+            raise ValueError(
+                f"Player {player} cannot play {action.card}; legal cards are {legal}."
+            )
+
+        self.hands[player].remove(action.card)
+        self.trick.append((player, action.card))
+
+        if self.led_suit is None:
+            self.led_suit = effective_suit(action.card, self.trump)
+
+    def choose_action_for_player(
+        self,
+        player: int,
+        policy: ActionPolicy,
+    ) -> Action:
+        observation = self.observation_for_player(player)
+        action = policy.choose_action(observation)
+
+        if action not in observation.legal_actions:
+            raise ValueError(
+                f"Policy chose illegal action {action}; legal actions were {observation.legal_actions}."
+            )
+
+        return action
+    
+
+
+
+class RandomActionPolicy:
+    def __init__(self, seed: Optional[int] = None):
+        self.random = random.Random(seed)
+
+    def choose_action(self, observation: Observation) -> Action:
+        if not observation.legal_actions:
+            raise ValueError("No legal actions available.")
+
+        return self.random.choice(observation.legal_actions)
+
+
