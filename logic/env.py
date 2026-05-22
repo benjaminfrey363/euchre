@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import random
-from typing import Optional, cast
+from typing import Optional, cast, Union
 
 from logic.cards import Card, Suit, make_deck, effective_suit
 from logic.rules import legal_cards, next_player, left_of, team_of, trick_winner
@@ -23,6 +23,72 @@ class SimulationStats:
     team_wins: tuple[int, int]
     average_score: tuple[float, float]
     average_hands_per_game: float
+
+
+
+
+
+
+
+
+
+@dataclass(frozen=True)
+class OrderUpAction:
+    order_up: bool
+
+
+@dataclass(frozen=True)
+class CallTrumpAction:
+    suit: Optional[Suit]
+
+
+@dataclass(frozen=True)
+class DiscardAction:
+    card: Card
+
+
+@dataclass(frozen=True)
+class PlayCardAction:
+    card: Card
+
+
+Action = Union[
+    OrderUpAction,
+    CallTrumpAction,
+    DiscardAction,
+    PlayCardAction,
+]
+
+
+@dataclass(frozen=True)
+class Observation:
+    """
+    What a player is allowed to know.
+
+    This is not yet encoded numerically for ML. It is a clean symbolic
+    representation that we can later convert into tensors/features.
+    """
+
+    player: int
+    dealer: int
+    scores: tuple[int, int]
+    hand: tuple[Card, ...]
+    upcard: Optional[Card]
+    trump: Optional[Suit]
+    maker: Optional[int]
+    trick: tuple[tuple[int, Card], ...]
+    tricks_by_team: tuple[int, int]
+    phase: str
+    legal_actions: tuple[Action, ...]
+
+
+
+
+
+
+
+
+
 
 
 class EuchreEnv:
@@ -68,6 +134,12 @@ class EuchreEnv:
         self.trump: Optional[Suit] = None
         self.maker: Optional[int] = None
 
+        self.phase = "not_started"
+        self.current_player = 0
+        self.trick: list[tuple[int, Card]] = []
+        self.tricks_by_team = [0, 0]
+        self.led_suit: Optional[Suit] = None
+
     def reset_game(self) -> None:
         self.dealer = 0
         self.scores = [0, 0]
@@ -76,6 +148,75 @@ class EuchreEnv:
         self.upcard = None
         self.trump = None
         self.maker = None
+
+        self.phase = "not_started"
+        self.current_player = 0
+        self.trick = []
+        self.tricks_by_team = [0, 0]
+        self.led_suit = None
+
+    
+    def observation_for_player(self, player: int) -> Observation:
+        if player not in {0, 1, 2, 3}:
+            raise ValueError(f"Invalid player index: {player}")
+
+        return Observation(
+            player=player,
+            dealer=self.dealer,
+            scores=(self.scores[0], self.scores[1]),
+            hand=tuple(self.hands[player]),
+            upcard=self.upcard,
+            trump=self.trump,
+            maker=self.maker,
+            trick=tuple(self.trick),
+            tricks_by_team=(self.tricks_by_team[0], self.tricks_by_team[1]),
+            phase=self.phase,
+            legal_actions=tuple(self.legal_actions_for_player(player)),
+        )
+
+
+    def legal_actions_for_player(self, player: int) -> list[Action]:
+        """
+        Symbolic legal actions for the given player in the current phase.
+
+        This is the method future ML policies will use before choosing an action.
+        """
+
+        if self.phase == "bidding_round_1":
+            actions: list[Action] = [
+                OrderUpAction(order_up=False),
+                OrderUpAction(order_up=True),
+            ]
+            return actions
+
+        if self.phase == "bidding_round_2":
+            assert self.upcard is not None
+            
+            actions: list[Action] = [CallTrumpAction(suit=None)]
+            actions.extend(
+                CallTrumpAction(suit=suit)
+                for suit in Suit
+                if suit != self.upcard.suit
+            )
+            return actions
+
+        if self.phase == "discard":
+            actions: list[Action] = [
+                DiscardAction(card=card)
+                for card in self.hands[player]
+            ]
+            return actions
+
+        if self.phase == "play_card":
+            assert self.trump is not None
+            legal = legal_cards(self.hands[player], self.trump, self.led_suit)
+            actions: list[Action] = [
+                PlayCardAction(card=card)
+                for card in legal
+            ]
+            return actions
+
+        return []
 
     def deal(self) -> None:
         deck = make_deck()
@@ -87,6 +228,12 @@ class EuchreEnv:
         self.trump = None
         self.maker = None
 
+        self.phase = "bidding_round_1"
+        self.current_player = left_of(self.dealer)
+        self.trick = []
+        self.tricks_by_team = [0, 0]
+        self.led_suit = None
+
     def bid_hand(self) -> bool:
         """
         Returns True if trump is chosen, False if all players pass.
@@ -97,6 +244,8 @@ class EuchreEnv:
         # Round 1: order up the upcard suit.
         player = left_of(self.dealer)
         for _ in range(4):
+            self.phase = "bidding_round_1"
+            self.current_player = player
             is_dealer = player == self.dealer
             wants_order = self.policies[player].choose_order_up(
                 cast(EuchreGame, self),
@@ -114,6 +263,8 @@ class EuchreEnv:
         # Round 2: choose any suit except the upcard suit.
         player = left_of(self.dealer)
         for _ in range(4):
+            self.phase = "bidding_round_2"
+            self.current_player = player
             is_dealer = player == self.dealer
             chosen = self.policies[player].choose_trump(
                 cast(EuchreGame, self),
@@ -133,6 +284,9 @@ class EuchreEnv:
         assert self.upcard is not None
         assert self.trump is not None
 
+        self.phase = "discard"
+        self.current_player = self.dealer
+
         self.hands[self.dealer].append(self.upcard)
         discard = self.policies[self.dealer].choose_discard(cast(EuchreGame, self), self.dealer)
 
@@ -145,21 +299,25 @@ class EuchreEnv:
         assert self.trump is not None
         trump = self.trump
 
-        tricks_by_team = [0, 0]
+        self.tricks_by_team = [0, 0]
         leader = left_of(self.dealer)
 
         for _ in range(5):
-            trick: list[tuple[int, Card]] = []
-            led_suit: Optional[Suit] = None
+            self.trick: list[tuple[int, Card]] = []
+            self.led_suit: Optional[Suit] = None
             player = leader
 
             for _ in range(4):
-                legal = legal_cards(self.hands[player], trump, led_suit)
+
+                self.phase = "play_card"
+                self.current_player = player
+
+                legal = legal_cards(self.hands[player], trump, self.led_suit)
                 card = self.policies[player].choose_card(
                     cast(EuchreGame, self),
                     player,
                     legal,
-                    trick,
+                    self.trick,
                 )
 
                 if card not in legal:
@@ -169,18 +327,19 @@ class EuchreEnv:
                     )
 
                 self.hands[player].remove(card)
-                trick.append((player, card))
+                self.trick.append((player, card))
 
-                if led_suit is None:
-                    led_suit = effective_suit(card, trump)
+                if self.led_suit is None:
+                    self.led_suit = effective_suit(card, trump)
 
                 player = next_player(player)
 
-            winner = trick_winner(trick, trump)
-            tricks_by_team[team_of(winner)] += 1
+            winner = trick_winner(self.trick, trump)
+            self.tricks_by_team[team_of(winner)] += 1
             leader = winner
 
-        return tricks_by_team
+
+        return self.tricks_by_team
 
     def score_hand(self, tricks_by_team: list[int]) -> HandResult:
         assert self.maker is not None
