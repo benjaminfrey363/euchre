@@ -424,8 +424,10 @@ class EuchreGUI:
         self.current_player = winner
 
         self.phase = "trick_over"
+        winner_name = SEAT_NAMES[winner]
+        win_verb = "win" if winner == 0 else "wins"
         self.status_var.set(
-            f"{SEAT_NAMES[winner]} wins trick {self.trick_number}. "
+            f"{SEAT_NAMES[winner]} {win_verb} trick {self.trick_number}. "
             f"Tricks: Team 0 = {self.tricks_by_team[0]}, Team 1 = {self.tricks_by_team[1]}."
         )
         self.clear_actions()
