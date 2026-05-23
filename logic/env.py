@@ -75,6 +75,12 @@ class Observation:
     legal_actions: tuple[Action, ...]
     played_cards: tuple[Card, ...]
 
+    led_suit: Optional[Suit]
+    current_trick_winner: Optional[int]
+    current_trick_winning_card: Optional[Card]
+    partner_winning_trick: bool
+    legal_cards: tuple[Card, ...]
+
 
 
 class ActionPolicy(Protocol):
@@ -166,6 +172,20 @@ class EuchreEnv:
     def observation_for_player(self, player: int) -> Observation:
         if player not in {0, 1, 2, 3}:
             raise ValueError(f"Invalid player index: {player}")
+        
+        if self.phase == "play_card" and self.trump is not None:
+            legal_cards_for_player = tuple(
+                legal_cards(self.hands[player], self.trump, self.led_suit)
+            )
+        else:
+            legal_cards_for_player = tuple()
+
+        winning_player = self.current_trick_winner()
+        winning_card = self.current_trick_winning_card()
+        partner_winning = (
+            winning_player is not None
+            and team_of(winning_player) == team_of(player)
+        )
 
         return Observation(
             player=player,
@@ -180,6 +200,11 @@ class EuchreEnv:
             phase=self.phase,
             legal_actions=tuple(self.legal_actions_for_player(player)),
             played_cards=tuple(self.played_cards),
+            led_suit=self.led_suit,
+            current_trick_winner=winning_player,
+            current_trick_winning_card=winning_card,
+            partner_winning_trick=partner_winning,
+            legal_cards=legal_cards_for_player,
         )
 
 
@@ -575,6 +600,27 @@ class EuchreEnv:
             self.deal()
 
         return result
+    
+
+    def current_trick_winner(self) -> Optional[int]:
+        if not self.trick:
+            return None
+        assert self.trump is not None
+        return trick_winner(self.trick, self.trump)
+
+
+    def current_trick_winning_card(self) -> Optional[Card]:
+        winner = self.current_trick_winner()
+        if winner is None:
+            return None
+
+        for player, card in self.trick:
+            if player == winner:
+                return card
+
+        raise RuntimeError("Current trick winner was not found in trick.")
+
+
     
     def step(self, action: Action) -> StepResult:
         """

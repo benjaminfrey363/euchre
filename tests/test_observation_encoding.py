@@ -8,6 +8,7 @@ from logic.observation_encoding import (
     observation_action_mask,
 )
 from logic.policies import Policy, RandomPolicy
+from logic.env import RandomActionPolicy
 
 
 def make_env() -> EuchreEnv:
@@ -63,4 +64,30 @@ def test_observation_action_mask_matches_legal_actions() -> None:
 
     for action_id in legal_action_ids(obs):
         assert mask[action_id] == 1
-        
+
+
+
+def test_play_context_features_exist_during_play() -> None:
+    policies: list[Policy] = [
+        RandomPolicy(),
+        RandomPolicy(),
+        RandomPolicy(),
+        RandomPolicy(),
+    ]
+    env = EuchreEnv(policies=policies, winning_score=10, seed=123)
+    obs = env.reset()
+
+    # Advance randomly until play_card with at least one trick card.
+    policy = RandomActionPolicy(seed=456)
+    for _ in range(100):
+        result = env.step(policy.choose_action(obs))
+        obs = result.observation
+
+        if obs.phase == "play_card" and len(obs.trick) > 0:
+            assert obs.led_suit is not None
+            assert obs.current_trick_winner is not None
+            assert obs.current_trick_winning_card is not None
+            assert len(obs.legal_cards) > 0
+            break
+    else:
+        raise AssertionError("Did not reach a nonempty play_card trick.")
