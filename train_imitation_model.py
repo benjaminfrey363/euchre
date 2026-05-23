@@ -11,6 +11,13 @@ from torch.utils.data import DataLoader, Dataset, random_split
 
 import argparse
 
+import time
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
+
 from logic.action_encoding import ACTION_SPACE_SIZE
 from logic.observation_encoding import ACTION_MASK_OFFSET
 
@@ -50,6 +57,8 @@ class ImitationDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]])
         masks: list[list[float]] = []
         actions: list[int] = []
 
+        print(f"Loading dataset from {csv_path}...")
+        start_time = time.perf_counter()
         with csv_path.open(newline="") as file:
             reader = csv.reader(file)
             header = next(reader)
@@ -61,7 +70,11 @@ class ImitationDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]])
                     f"expected {expected_min_columns}."
                 )
 
-            for row in reader:
+            row_iterator = reader
+            if tqdm is not None:
+                row_iterator = tqdm(reader, desc="Reading CSV rows", unit="rows")
+
+            for row in row_iterator:
                 if not row:
                     continue
 
@@ -86,6 +99,8 @@ class ImitationDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]])
         self.states = torch.tensor(states, dtype=torch.float32)
         self.masks = torch.tensor(masks, dtype=torch.float32)
         self.actions = torch.tensor(actions, dtype=torch.long)
+        elapsed = time.perf_counter() - start_time
+        print(f"Loaded {len(self.actions)} examples in {elapsed:.2f}s")
 
     def __len__(self) -> int:
         return len(self.actions)
@@ -129,6 +144,7 @@ def run_epoch(
     model: ImitationNet,
     loader: DataLoader[tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
     optimizer: Optional[torch.optim.Optimizer] = None,
+    description: str = "epoch",
 ) -> tuple[float, float]:
     training = optimizer is not None
     model.train(training)
@@ -139,7 +155,11 @@ def run_epoch(
 
     loss_fn = nn.CrossEntropyLoss()
 
-    for states, masks, targets in loader:
+    batch_iterator = loader
+    if tqdm is not None:
+        batch_iterator = tqdm(loader, desc=description, unit="batch", leave=False)
+
+    for states, masks, targets in batch_iterator:
         logits = model(states)
         masked_logits = mask_logits(logits, masks)
         loss = loss_fn(masked_logits, targets)
@@ -192,15 +212,29 @@ def train(config: TrainingConfig = TrainingConfig()) -> None:
     config.model_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(1, config.epochs + 1):
-        train_loss, train_accuracy = run_epoch(model, train_loader, optimizer)
+        epoch_start = time.perf_counter()
+
+        train_loss, train_accuracy = run_epoch(
+            model,
+            train_loader,
+            optimizer,
+            description=f"Epoch {epoch:02d} train",
+        )
 
         with torch.no_grad():
-            validation_loss, validation_accuracy = run_epoch(model, validation_loader)
+            validation_loss, validation_accuracy = run_epoch(
+                model,
+                validation_loader,
+                description=f"Epoch {epoch:02d} val",
+            )
+
+        epoch_elapsed = time.perf_counter() - epoch_start
 
         print(
             f"Epoch {epoch:02d} | "
             f"train loss {train_loss:.4f}, train acc {train_accuracy:.3f} | "
-            f"val loss {validation_loss:.4f}, val acc {validation_accuracy:.3f}"
+            f"val loss {validation_loss:.4f}, val acc {validation_accuracy:.3f} | "
+            f"time {epoch_elapsed:.1f}s"
         )
 
         if validation_accuracy > best_validation_accuracy:
