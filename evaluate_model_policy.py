@@ -179,7 +179,6 @@ def evaluate_all_matchups(
     for seed in seeds:
         # Create fresh model adapters for each matchup. This avoids sharing any
         # accidental mutable state if the policy later becomes stochastic.
-        '''
         matchups: list[tuple[str, list[Policy]]] = [
             (
                 "Model team vs Random team",
@@ -217,18 +216,6 @@ def evaluate_all_matchups(
                     make_model_policy(model_path),
                 ],
             ),
-        ]
-        '''
-        matchups: list[tuple[str, list[Policy]]] = [
-            (
-                "Model team vs Random team",
-                [
-                    make_model_policy(model_path),
-                    RandomPolicy(),
-                    make_model_policy(model_path),
-                    RandomPolicy(),
-                ],
-            )
         ]
         
 

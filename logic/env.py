@@ -62,13 +62,6 @@ Action = Union[
 
 @dataclass(frozen=True)
 class Observation:
-    """
-    What a player is allowed to know.
-
-    This is not yet encoded numerically for ML. It is a clean symbolic
-    representation that we can later convert into tensors/features.
-    """
-
     player: int
     dealer: int
     scores: tuple[int, int]
@@ -80,6 +73,7 @@ class Observation:
     tricks_by_team: tuple[int, int]
     phase: str
     legal_actions: tuple[Action, ...]
+    played_cards: tuple[Card, ...]
 
 
 
@@ -149,6 +143,8 @@ class EuchreEnv:
         self.tricks_by_team = [0, 0]
         self.led_suit: Optional[Suit] = None
 
+        self.played_cards: list[Card] = []
+
     def reset_game(self) -> None:
         self.dealer = 0
         self.scores = [0, 0]
@@ -163,6 +159,8 @@ class EuchreEnv:
         self.trick = []
         self.tricks_by_team = [0, 0]
         self.led_suit = None
+
+        self.played_cards = []
 
     
     def observation_for_player(self, player: int) -> Observation:
@@ -181,6 +179,7 @@ class EuchreEnv:
             tricks_by_team=(self.tricks_by_team[0], self.tricks_by_team[1]),
             phase=self.phase,
             legal_actions=tuple(self.legal_actions_for_player(player)),
+            played_cards=tuple(self.played_cards),
         )
 
 
@@ -242,6 +241,8 @@ class EuchreEnv:
         self.trick = []
         self.tricks_by_team = [0, 0]
         self.led_suit = None
+
+        self.played_cards = []
 
     def bid_hand(self) -> bool:
         """
@@ -478,6 +479,8 @@ class EuchreEnv:
 
         self.hands[player].remove(action.card)
         self.trick.append((player, action.card))
+
+        self.played_cards.append(action.card)
 
         if self.led_suit is None:
             self.led_suit = effective_suit(action.card, self.trump)

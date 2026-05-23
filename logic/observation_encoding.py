@@ -51,15 +51,16 @@ PHASE_ORDER: tuple[str, ...] = (
 
 
 HAND_OFFSET = 0
-TRICK_OFFSET = HAND_OFFSET + 24
-UPCARD_OFFSET = TRICK_OFFSET + 24
-TRUMP_OFFSET = UPCARD_OFFSET + 24
-DEALER_OFFSET = TRUMP_OFFSET + 4
-MAKER_OFFSET = DEALER_OFFSET + 4
-PLAYER_OFFSET = MAKER_OFFSET + 4
-SCORE_OFFSET = PLAYER_OFFSET + 4
-TRICKS_OFFSET = SCORE_OFFSET + 4
-PHASE_OFFSET = TRICKS_OFFSET + 4
+TRICK_BY_PLAYER_OFFSET = HAND_OFFSET + 24          # 24-119, four blocks of 24
+PLAYED_CARDS_OFFSET = TRICK_BY_PLAYER_OFFSET + 96  # 120-143
+UPCARD_OFFSET = PLAYED_CARDS_OFFSET + 24           # 144-167
+TRUMP_OFFSET = UPCARD_OFFSET + 24                  # 168-171
+DEALER_OFFSET = TRUMP_OFFSET + 4                   # 172-175
+MAKER_OFFSET = DEALER_OFFSET + 4                   # 176-179
+PLAYER_OFFSET = MAKER_OFFSET + 4                   # 180-183
+SCORE_OFFSET = PLAYER_OFFSET + 4                   # 184-187
+TRICKS_OFFSET = SCORE_OFFSET + 4                   # 188-191
+PHASE_OFFSET = TRICKS_OFFSET + 4                   # 192-197
 ACTION_MASK_OFFSET = PHASE_OFFSET + len(PHASE_ORDER)
 OBSERVATION_VECTOR_SIZE = ACTION_MASK_OFFSET + ACTION_SPACE_SIZE
 
@@ -67,7 +68,8 @@ OBSERVATION_VECTOR_SIZE = ACTION_MASK_OFFSET + ACTION_SPACE_SIZE
 @dataclass(frozen=True)
 class ObservationEncodingLayout:
     hand_offset: int = HAND_OFFSET
-    trick_offset: int = TRICK_OFFSET
+    trick_by_player_offset: int = TRICK_BY_PLAYER_OFFSET
+    played_cards_offset: int = PLAYED_CARDS_OFFSET
     upcard_offset: int = UPCARD_OFFSET
     trump_offset: int = TRUMP_OFFSET
     dealer_offset: int = DEALER_OFFSET
@@ -112,8 +114,13 @@ def encode_observation(obs: Observation) -> list[float]:
 
     # Cards currently in the trick. This currently ignores who played them;
     # that can be added later as a richer feature.
-    for _, card in obs.trick:
-        _set_card_one_hot(vector, TRICK_OFFSET, card)
+    for trick_player, card in obs.trick:
+        offset = TRICK_BY_PLAYER_OFFSET + 24 * trick_player
+        _set_card_one_hot(vector, offset, card)
+
+    
+    for card in obs.played_cards:
+        _set_card_one_hot(vector, PLAYED_CARDS_OFFSET, card)
 
     # Upcard.
     if obs.upcard is not None:

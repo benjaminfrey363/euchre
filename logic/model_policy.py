@@ -58,6 +58,18 @@ class ModelActionPolicy:
 
         self.model = ImitationNet(input_size=input_size)
         self.model.load_state_dict(checkpoint["model_state_dict"])
+
+        expected_input_size = int(checkpoint.get("input_size", ACTION_MASK_OFFSET))
+        current_input_size = ACTION_MASK_OFFSET
+
+        if expected_input_size != current_input_size:
+            raise ValueError(
+                f"Model input size mismatch: checkpoint expects {expected_input_size}, "
+                f"but current observation encoder produces {current_input_size}. "
+                f"This usually means the model was trained with an older observation encoding. "
+                f"Retrain the model with the current encoder."
+            )
+
         self.model.eval()
 
     def choose_action(self, observation: Observation) -> Action:
