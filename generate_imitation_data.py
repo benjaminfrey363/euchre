@@ -4,6 +4,8 @@ import csv
 from pathlib import Path
 from typing import cast
 
+import argparse
+
 from logic.action_encoding import action_to_id
 from logic.env import Action, EuchreEnv, Observation, PlayCardAction
 from logic.observation_encoding import encode_observation_without_action_mask, observation_action_mask
@@ -140,8 +142,35 @@ def generate_dataset(n_games: int, output_path: Path = OUTPUT_PATH, seed: int = 
 
 
 def main() -> None:
-    generate_dataset(n_games=1000)
+    parser = argparse.ArgumentParser(description="Generate SimpleBot imitation data.")
+    parser.add_argument(
+        "--games",
+        type=int,
+        default=10_000,
+        help="Number of games to generate.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT_PATH,
+        help="Output CSV path.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=123,
+        help="Random seed.",
+    )
+
+    args = parser.parse_args()
+
+    generate_dataset(
+        n_games=args.games,
+        output_path=args.output,
+        seed=args.seed,
+    )
 
 
 if __name__ == "__main__":
     main()
+

@@ -9,6 +9,7 @@ from logic.env import EuchreEnv, Observation, SimulationStats
 from logic.model_policy import ModelActionPolicy
 from logic.policies import EuchreGame, Policy, RandomPolicy, SimpleBotPolicy
 
+import argparse
 
 DEFAULT_N_GAMES = 10_000
 DEFAULT_SEEDS = [123, 456, 789]
@@ -239,17 +240,38 @@ def evaluate_all_matchups(
         summarize_across_seeds(name, results)
 
 
-def main() -> None:
-    model_path = Path("models/imitation_simple_bot.pt")
 
-    # For a fast check, set n_games lower, e.g. 1000.
-    # For stable benchmarking, use 10_000 or more.
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Evaluate a trained Euchre model policy.")
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=Path("models/imitation_simple_bot.pt"),
+        help="Path to trained model checkpoint.",
+    )
+    parser.add_argument(
+        "--games",
+        type=int,
+        default=DEFAULT_N_GAMES,
+        help="Number of games per matchup.",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=DEFAULT_SEEDS,
+        help="Evaluation seeds.",
+    )
+
+    args = parser.parse_args()
+
     evaluate_all_matchups(
-        model_path=model_path,
-        n_games=DEFAULT_N_GAMES,
-        seeds=DEFAULT_SEEDS,
+        model_path=args.model,
+        n_games=args.games,
+        seeds=args.seeds,
     )
 
 
 if __name__ == "__main__":
     main()
+

@@ -9,16 +9,20 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset, random_split
 
+import argparse
+
 from logic.action_encoding import ACTION_SPACE_SIZE
 from logic.observation_encoding import ACTION_MASK_OFFSET
 
 
-DATA_PATH = Path("data/imitation_simple_bot.csv")
-MODEL_PATH = Path("models/imitation_simple_bot.pt")
+DEFAULT_DATA_PATH = Path("data/imitation_simple_bot.csv")
+DEFAULT_MODEL_PATH = Path("models/imitation_simple_bot.pt")
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
+    data_path: Path = DEFAULT_DATA_PATH
+    model_path: Path = DEFAULT_MODEL_PATH
     batch_size: int = 256
     epochs: int = 20
     learning_rate: float = 1e-3
@@ -156,7 +160,7 @@ def run_epoch(
 def train(config: TrainingConfig = TrainingConfig()) -> None:
     torch.manual_seed(config.seed)
 
-    dataset = ImitationDataset(DATA_PATH)
+    dataset = ImitationDataset(config.data_path)
     if len(dataset) < 10:
         raise ValueError("Dataset is too small to train. Generate more games first.")
 
@@ -185,7 +189,7 @@ def train(config: TrainingConfig = TrainingConfig()) -> None:
     print()
 
     best_validation_accuracy = -1.0
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    config.model_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(1, config.epochs + 1):
         train_loss, train_accuracy = run_epoch(model, train_loader, optimizer)
@@ -207,19 +211,53 @@ def train(config: TrainingConfig = TrainingConfig()) -> None:
                     "input_size": input_size,
                     "action_space_size": ACTION_SPACE_SIZE,
                     "validation_accuracy": validation_accuracy,
-                    "config": config.__dict__,
+                    "config": {
+                        **config.__dict__,
+                        "data_path": str(config.data_path),
+                        "model_path": str(config.model_path),
+                    },
                 },
-                MODEL_PATH,
+                config.model_path,
             )
 
     print()
     print(f"Best validation accuracy: {best_validation_accuracy:.3f}")
-    print(f"Saved model to {MODEL_PATH}")
+    print(f"Saved model to {config.model_path}")
 
 
 def main() -> None:
-    train()
+    parser = argparse.ArgumentParser(description="Train an imitation model.")
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=DEFAULT_DATA_PATH,
+        help="Path to imitation CSV dataset.",
+    )
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=DEFAULT_MODEL_PATH,
+        help="Path to save trained model.",
+    )
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--seed", type=int, default=123)
+
+    args = parser.parse_args()
+
+    train(
+        TrainingConfig(
+            data_path=args.data,
+            model_path=args.model,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.lr,
+            seed=args.seed,
+        )
+    )
 
 
 if __name__ == "__main__":
     main()
+

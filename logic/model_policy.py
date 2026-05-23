@@ -53,7 +53,7 @@ class ModelActionPolicy:
                 f"Could not find model at {self.model_path}. Run train_imitation_model.py first."
             )
 
-        checkpoint = torch.load(self.model_path, map_location="cpu")
+        checkpoint = torch.load(self.model_path, map_location="cpu", weights_only=False)
         input_size = int(checkpoint.get("input_size", ACTION_MASK_OFFSET))
 
         self.model = ImitationNet(input_size=input_size)
