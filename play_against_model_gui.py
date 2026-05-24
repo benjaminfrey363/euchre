@@ -56,6 +56,7 @@ class PlayAgainstModelGUI:
         self.status_var = tk.StringVar(value="Welcome to Euchre.")
         self.score_var = tk.StringVar(value="")
 
+        self.display_trick: list[tuple[int, Card]] = []
         self.last_action_text = ""
         self.last_info_text = ""
         self.waiting_for_continue = False
@@ -124,6 +125,7 @@ class PlayAgainstModelGUI:
         self.clear_continue_button()
         self.done = False
         self.waiting_for_continue = False
+        self.display_trick = []
         self.last_action_text = ""
         self.last_info_text = ""
         self.env.reset()
@@ -135,20 +137,30 @@ class PlayAgainstModelGUI:
         return self.env.observation_for_player(self.env.current_player)
 
     def advance_bots_if_needed(self) -> None:
-        if self.done or self.waiting_for_continue:
+        if self.done:
             self.render()
+            return
+
+        if self.waiting_for_continue:
+            self.render()
+            self.show_continue_button()
             return
 
         while self.env.current_player != 0 and not self.done and not self.waiting_for_continue:
             obs = self.current_observation()
             action = self.model_policy.choose_action(obs)
+            trick_before_step = list(self.env.trick)
             result = self.env.step(action)
+            if isinstance(action, PlayCardAction):
+                self.display_trick = trick_before_step + [(obs.player, action.card)]
 
             self.last_action_text = f"{SEAT_NAMES[obs.player]}: {self.describe_action(action)}"
             self.last_info_text = self.describe_step_info(result.info)
+            if isinstance(action, PlayCardAction) and not self.last_info_text:
+                self.last_info_text = "Press Continue for the next play."
             self.done = result.done
 
-            if self.is_important_step(result.info):
+            if self.is_important_step(action, result.info):
                 self.waiting_for_continue = True
                 self.render()
                 self.show_continue_button()
@@ -169,9 +181,15 @@ class PlayAgainstModelGUI:
         if obs.player != 0:
             return
 
+        trick_before_step = list(self.env.trick)
         result = self.env.step(action)
+        if isinstance(action, PlayCardAction):
+            self.display_trick = trick_before_step + [(obs.player, action.card)]
+
         self.last_action_text = f"You: {self.describe_action(action)}"
         self.last_info_text = self.describe_step_info(result.info)
+        if isinstance(action, PlayCardAction) and not self.last_info_text:
+            self.last_info_text = "Press Continue for the next play."
         self.done = result.done
 
         self.clear_actions()
@@ -181,16 +199,21 @@ class PlayAgainstModelGUI:
         if self.done:
             return
 
-        if self.is_important_step(result.info):
+        if self.is_important_step(action, result.info):
             self.waiting_for_continue = True
             self.show_continue_button()
             return
 
-        self.root.after(450, self.advance_bots_if_needed)
+        self.root.after(700, self.advance_bots_if_needed)
 
     @staticmethod
-    def is_important_step(info: dict[str, object]) -> bool:
-        return "trick_winner" in info or "hand_result" in info or "final_score" in info
+    def is_important_step(action: Action, info: dict[str, object]) -> bool:
+        return (
+            isinstance(action, PlayCardAction)
+            or "trick_winner" in info
+            or "hand_result" in info
+            or "final_score" in info
+        )
 
     def clear_continue_button(self) -> None:
         if self.continue_window_id is not None:
@@ -219,6 +242,12 @@ class PlayAgainstModelGUI:
 
     def continue_after_pause(self) -> None:
         self.clear_continue_button()
+
+        if len(self.display_trick) == 4:
+            self.display_trick = []
+        else:
+            self.display_trick = list(self.env.trick)
+
         self.waiting_for_continue = False
         self.clear_actions()
         self.clear_hand_buttons()
@@ -227,7 +256,7 @@ class PlayAgainstModelGUI:
         if self.done:
             return
 
-        self.root.after(250, self.advance_bots_if_needed)
+        self.root.after(700, self.advance_bots_if_needed)
 
     # ------------------------------------------------------------------
     # Human prompts
@@ -469,7 +498,9 @@ class PlayAgainstModelGUI:
             3: (TABLE_WIDTH // 2 + 100, TABLE_HEIGHT // 2 - CARD_HEIGHT // 2),
         }
 
-        for player, card in self.env.trick:
+        trick_to_draw = self.display_trick if self.display_trick else self.env.trick
+
+        for player, card in trick_to_draw:
             x, y = positions[player]
             self.draw_card(card, x, y)
             self.canvas.create_text(
