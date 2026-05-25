@@ -1,0 +1,4 @@
+Model                         Avg win % vs SimpleBot    Avg win % vs Random
+SimpleBot imitation 5k         ~38%                      ~92–93%
+Mixed Simple3k + ISMC500       ~50.9%                    ~95–96%
+Mixed Simple5k + ISMC1k        ~55.4%                    ~96–97%
