@@ -139,6 +139,30 @@ play_card
 
 Recent diagnostics showed that bidding is learned almost perfectly, while `play_card` is the weakest phase.
 
+## Estimate the Policy Frontier
+
+To compare the current model against stronger search policies from both seating
+orientations:
+
+```bash
+python3.11 evaluate_policy_frontier.py \
+  --model models/best_mixed_simple3k_ismc500.pt \
+  --games 1000 \
+  --seeds 123 456 789
+```
+
+This benchmarks:
+
+```text
+model   current trained checkpoint
+ismc    fair information-set Monte Carlo, no hidden-card access
+oracle  hidden-information Monte Carlo upper-bound probe
+```
+
+The oracle policy is not a legal deployable Euchre player because it sees hidden
+hands. Treat it as a ceiling/probe for “how much could perfect information help”
+rather than as fair perfect play.
+
 ## Current ML Pipeline
 
 The current pipeline is:
