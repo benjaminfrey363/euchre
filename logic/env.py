@@ -81,6 +81,8 @@ class Observation:
     partner_winning_trick: bool
     legal_cards: tuple[Card, ...]
 
+    void_suits: tuple[tuple[Suit, ...], ...]
+
 
 
 class ActionPolicy(Protocol):
@@ -151,6 +153,8 @@ class EuchreEnv:
 
         self.played_cards: list[Card] = []
 
+        self.void_suits: list[set[Suit]] = [set() for _ in range(4)]
+
     def reset_game(self) -> None:
         self.dealer = 0
         self.scores = [0, 0]
@@ -167,6 +171,8 @@ class EuchreEnv:
         self.led_suit = None
 
         self.played_cards = []
+
+        self.void_suits = [set() for _ in range(4)]
 
     
     def observation_for_player(self, player: int) -> Observation:
@@ -205,6 +211,10 @@ class EuchreEnv:
             current_trick_winning_card=winning_card,
             partner_winning_trick=partner_winning,
             legal_cards=legal_cards_for_player,
+            void_suits=tuple(
+                tuple(sorted(suits, key=lambda suit: suit.value))
+                for suits in self.void_suits
+            ),
         )
 
 
@@ -268,6 +278,8 @@ class EuchreEnv:
         self.led_suit = None
 
         self.played_cards = []
+
+        self.void_suits = [set() for _ in range(4)]
 
     def bid_hand(self) -> bool:
         """
@@ -502,13 +514,17 @@ class EuchreEnv:
                 f"Player {player} cannot play {action.card}; legal cards are {legal}."
             )
 
+        played_effective_suit = effective_suit(action.card, self.trump)
+
+        if self.led_suit is not None and played_effective_suit != self.led_suit:
+            self.void_suits[player].add(self.led_suit)
+
         self.hands[player].remove(action.card)
         self.trick.append((player, action.card))
-
         self.played_cards.append(action.card)
 
         if self.led_suit is None:
-            self.led_suit = effective_suit(action.card, self.trump)
+            self.led_suit = played_effective_suit
 
     def choose_action_for_player(
         self,

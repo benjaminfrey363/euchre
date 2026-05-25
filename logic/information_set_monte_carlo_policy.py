@@ -6,7 +6,7 @@ import random
 from typing import Optional
 
 from logic.action_encoding import action_to_id
-from logic.cards import Card, make_deck
+from logic.cards import Card, make_deck, Suit, effective_suit
 from logic.env import Action, EuchreEnv, Observation, PlayCardAction, StepResult
 from logic.monte_carlo_policy import SimpleBotActionAdapter
 from logic.rules import team_of
@@ -100,6 +100,90 @@ class InformationSetMonteCarloPolicy:
         )
         return InformationSetDecision(chosen_action=best.action, evaluations=evaluations)
 
+
+
+    def sample_hidden_hands_unconstrained(
+        self,
+        unknown_cards: list[Card],
+        hidden_players: list[int],
+        hand_sizes: list[int],
+    ) -> dict[int, list[Card]]:
+        cards = list(unknown_cards)
+        self.random.shuffle(cards)
+
+        assignments: dict[int, list[Card]] = {}
+        cursor = 0
+
+        for player in hidden_players:
+            size = hand_sizes[player]
+            assignments[player] = cards[cursor : cursor + size]
+            cursor += size
+
+        return assignments
+
+
+
+    def sample_hidden_hands_with_void_constraints(
+        self,
+        unknown_cards: list[Card],
+        hidden_players: list[int],
+        hand_sizes: list[int],
+        void_suits: tuple[tuple[Suit, ...], ...],
+        trump: Optional[Suit],
+        max_attempts: int = 100,
+    ) -> dict[int, list[Card]]:
+        """
+        Assign unknown cards to hidden players while respecting known void suits.
+
+        If constraints are too tight, fall back to unconstrained random assignment.
+        This keeps rollouts robust even if our inferred constraints become
+        inconsistent because of a bug or edge case.
+        """
+        if trump is None:
+            return self.sample_hidden_hands_unconstrained(
+                unknown_cards=unknown_cards,
+                hidden_players=hidden_players,
+                hand_sizes=hand_sizes,
+            )
+
+        for _ in range(max_attempts):
+            cards = list(unknown_cards)
+            self.random.shuffle(cards)
+
+            assignments: dict[int, list[Card]] = {player: [] for player in hidden_players}
+
+            success = True
+            for player in hidden_players:
+                needed = hand_sizes[player]
+                forbidden_suits = set(void_suits[player])
+
+                chosen: list[Card] = []
+                remaining: list[Card] = []
+
+                for card in cards:
+                    if len(chosen) < needed and effective_suit(card, trump) not in forbidden_suits:
+                        chosen.append(card)
+                    else:
+                        remaining.append(card)
+
+                if len(chosen) != needed:
+                    success = False
+                    break
+
+                assignments[player] = chosen
+                cards = remaining
+
+            if success:
+                return assignments
+
+        # Fallback: do not crash training/evaluation because of one impossible sample.
+        return self.sample_hidden_hands_unconstrained(
+            unknown_cards=unknown_cards,
+            hidden_players=hidden_players,
+            hand_sizes=hand_sizes,
+        )
+
+
     def sample_compatible_env(self, env: EuchreEnv, obs: Observation) -> EuchreEnv:
         """
         Clone env and resample hidden hands.
@@ -110,12 +194,13 @@ class InformationSetMonteCarloPolicy:
         - played cards
         - scores, trump, maker, dealer, current player, etc.
         - hand sizes for hidden players
+        - void-suit information inferred from earlier plays
 
         We randomize:
         - card identities in other players' current hands
         - remaining kitty/discard pool
 
-        This deliberately avoids using the true hidden card identities from env.
+        This avoids using true hidden card identities and respects known voids.
         """
         sampled_env = deepcopy(env)
         acting_player = obs.player
@@ -128,21 +213,25 @@ class InformationSetMonteCarloPolicy:
         unknown_cards = [card for card in deck if card not in known_cards]
         self.random.shuffle(unknown_cards)
 
-        # Preserve current hand sizes. Card counts are public; card identities are not.
         hand_sizes = [len(env.hands[player]) for player in range(4)]
-
         sampled_env.hands[acting_player] = list(obs.hand)
 
-        cursor = 0
-        for player in range(4):
-            if player == acting_player:
-                continue
+        hidden_players = [player for player in range(4) if player != acting_player]
 
-            size = hand_sizes[player]
-            sampled_env.hands[player] = unknown_cards[cursor : cursor + size]
-            cursor += size
+        hidden_assignments = self.sample_hidden_hands_with_void_constraints(
+            unknown_cards=unknown_cards,
+            hidden_players=hidden_players,
+            hand_sizes=hand_sizes,
+            void_suits=obs.void_suits,
+            trump=obs.trump,
+        )
 
-        sampled_env.kitty = unknown_cards[cursor:]
+        used_cards: set[Card] = set()
+        for player, hand in hidden_assignments.items():
+            sampled_env.hands[player] = hand
+            used_cards.update(hand)
+
+        sampled_env.kitty = [card for card in unknown_cards if card not in used_cards]
         return sampled_env
 
     def evaluate_action_once(

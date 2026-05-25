@@ -45,6 +45,14 @@ brew install python-tk@3.11
 python3.11 euchre_gui.py
 ```
 
+To run the GUI against a trained model, run
+
+```bash
+python3.11 play_against_model_gui.py \ 
+  --model models/best_mixed_simple5k_ismc1k.pt \
+  --seed 123
+```
+
 ## Run Tests
 
 Use `python -m pytest` so the project root is on the import path:
